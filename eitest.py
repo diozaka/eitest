@@ -4,8 +4,9 @@ from numba import njit
 
 @njit
 def distance_transform(event_series):
-    # Compute the distance to the most recent event at every time step.
-    # We consider all values != 0 as event occurrences.
+    '''Compute the distance to the most recent event at every time step.
+
+    We consider all values != 0 as event occurrences.'''
     T = len(event_series)
     distance_to_event = np.empty(T)
     distance_to_event[event_series != 0] = 0
@@ -16,9 +17,10 @@ def distance_transform(event_series):
 
 @njit
 def obtain_samples(event_series, time_series, lag_cutoff=0):
-    # Compute the samples T_k for all lags k as mentioned in the paper.
-    # Setting lag_cutoff to zero means that all lags are considered, for values larger
-    # than zero only lags up to and including the specified value are considered.
+    '''Compute the samples T_k for all lags k as mentioned in the paper.
+
+    Setting lag_cutoff to zero means that all lags are considered, for values larger
+    than zero only lags up to and including the specified value are considered.'''
     dt = distance_transform(event_series)
     min_lag = 1
     max_lag = max(dt[~np.isinf(dt)])
@@ -34,7 +36,7 @@ def obtain_samples(event_series, time_series, lag_cutoff=0):
 @njit
 def _ks_twosamp_stat(data1, data2, min_pts):
     '''Numba helper to compute the test statistic value for the Kolmogorov-Smirnov two-sample test.
-    
+
     Adapted from scipy.stats.ks_2samp.'''
     n1 = len(data1)
     n2 = len(data2)
@@ -66,13 +68,13 @@ def _ks_twosamp_stat_pairwise(sample, min_pts):
 
 def pairwise_twosample_tests(sample, test, min_pts=2):
     '''For each pair of lags i<j, test whether the distributions at lags i and j are identical.
-    
+
     sample: dict with numeric lag value as key and numpy.array as value, as returned
             by obtain_samples(). Keys do not have to be consecutive.
     test: either 'ks' or 'mmd'.
     min_pts: minimum number of data points required in a sample to tested (default: 2);
              test result is np.nan for skipped tests.'''
-    
+
     if test == 'ks':
         ds, ens = _ks_twosamp_stat_pairwise(sample, min_pts)
         prob = ss.distributions.kstwobign.sf(ens * ds)
