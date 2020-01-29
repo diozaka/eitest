@@ -16,13 +16,13 @@ def distance_transform(event_series):
     return distance_to_event
 
 @njit
-def obtain_samples(event_series, time_series, lag_cutoff=0):
+def obtain_samples(event_series, time_series, lag_cutoff=0, instantaneous=False):
     '''Compute the samples T_k for all lags k as mentioned in the paper.
 
     Setting lag_cutoff to zero means that all lags are considered, for values larger
     than zero only lags up to and including the specified value are considered.'''
     dt = distance_transform(event_series)
-    min_lag = 1
+    min_lag = 0 if instantaneous else 1
     max_lag = max(dt[~np.isinf(dt)])
     if lag_cutoff > 0:
         max_lag = min(max_lag, lag_cutoff)
@@ -77,8 +77,14 @@ def pairwise_twosample_tests(sample, test, min_pts=2):
 
     if test == 'ks':
         ds, ens = _ks_twosamp_stat_pairwise(sample, min_pts)
-        prob = ss.distributions.kstwobign.sf(ens * ds)
-        return ds, prob
+        # There are several alternatives to compute the p-values of the test statistic values.
+        # SciPy 0.19.x (used for the experiments in the paper):
+        probs = ss.distributions.kstwobign.sf((ens + 0.12 + 0.11 / ens) * ds)
+        # SciPy 1.4.x (with mode='asymp'):
+        # probs = ss.distributions.kstwobign.sf(ens * ds)
+        # SciPy 1.4.x (with mode='exact'):
+        # TODO
+        return ds, probs
     else:
         raise NotImplementedError("only ks implemented so far")
 
