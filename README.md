@@ -2,7 +2,7 @@
 An implementation of EITEST (Event Information TEST) to discover statistical relationships between event series and time series. The methodology is described and analysed in detail in the paper:
 
 Erik Scharwächter, Emmanuel Müller: **Two-Sample Testing for Event Impacts in Time Series.**
-In: SIAM International Conference on Data Mining (SDM20).
+In: SIAM International Conference on Data Mining (SDM20, to appear). [[Preprint @ arXiv:2001.11930]](https://arxiv.org/abs/2001.11930)
 
 ## Contact and Citation
 
