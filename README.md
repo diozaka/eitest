@@ -8,12 +8,12 @@ In: Proceedings of the 2020 SIAM International Conference on Data Mining (SIAM S
 
 ## Contact and Citation
 
-* Corresponding author: [Erik Scharwächter](mailto:scharwaechter@bit-uni-bonn.de)
+* Corresponding author: [Erik Scharwächter](mailto:erik.scharwaechter@cs.tu-dortmund.de)
 * Please cite our paper if you use or modify our code for your own work.
 
 ## Requirements and Usage
 
-Our module [eitest.py](./eitest.py) was developed with [Python 3.7](https://www.python.org/) and requires [NumPy](https://numpy.org/), [SciPy](https://scipy.org/) and [Numba](https://numba.pydata.org/). Check the Jupyter notebook [ampds.ipynb](./ampds.ipynb) to reproduce the results from our paper and understand how to use our module. The notebook additionally requires [Pandas](https://pandas.pydata.org/).
+Our module [eitest.py](./eitest.py) was developed with [Python 3.7](https://www.python.org/) and requires [NumPy](https://numpy.org/), [SciPy](https://scipy.org/) and [Numba](https://numba.pydata.org/). Check the Jupyter notebook [ampds.ipynb](./ampds.ipynb) to reproduce the results from our paper and understand how to use our module. The notebook additionally requires [Pandas](https://pandas.pydata.org/). Check [simulations.ipynb](./simulations.ipynb) for code to reproduce results from our simulation study.
 
 ## License
 
