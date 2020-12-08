@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.stats as ss
+import matplotlib.pyplot as plt
 from numba import njit
 
 @njit
@@ -16,31 +17,50 @@ def distance_transform(event_series):
     return distance_to_event
 
 @njit
-def obtain_samples(event_series, time_series, lag_cutoff=0, instantaneous=True, sort=True):
-    '''Compute the samples T_k for all lags k as mentioned in the paper.
+def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', instantaneous=True, sort=True):
+    '''Compute the samples T_k for all lags k.
+
+    With "eager" sampling, we sample from P(x_t | e_{t-k}=1, e_{t-k+1}=0, ..., e_t=0)
+    as described in the paper. With "lazy" sampling, we sample from P(x_t | e_{t-k}=1).
+    Lazy sampling results in larger samples, but leads to duplicate use of the same
+    observation from the time series in multiple random samples.
 
     Setting lag_cutoff to zero means that all lags are considered, for values larger
     than zero only lags up to and including the specified value are considered.
     If instantaneous is True, the sample at lag k=0 is included.
+
     If sort is True, all samples are sorted ascendingly.'''
+    sample = dict()
+    series_length = len(event_series)
 
-    dt = distance_transform(event_series)
-    min_lag = 0 if instantaneous else 1
-    max_lag = max(dt[~np.isinf(dt)])
-    if lag_cutoff > 0:
-        max_lag = min(max_lag, lag_cutoff)
-    max_lag = int(max_lag)
+    if method == 'eager':
+        # sample from P(x_t | e_{t-k}=1, e_{t-k+1}=0, ..., e_t=0)
+        dt = distance_transform(event_series)
+        for lag in range(0 if instantaneous else 1, series_length if lag_cutoff == 0 else lag_cutoff):
+            idx = np.where(dt == lag)[0]
+            if len(idx) < 2:
+                break
+            sample[lag] = time_series[idx]
+    elif method == 'lazy':
+        # sample from P(x_t | e_{t-k}=1)
+        event_idx = np.where(event_series == 1)[0]
+        for lag in range(0 if instantaneous else 1, series_length if lag_cutoff == 0 else lag_cutoff):
+            idx = event_idx + lag
+            idx = idx[idx < series_length]
+            if len(idx) < 2:
+                break
+            sample[lag] = time_series[idx]
 
-    sample = dict() # dict comprehension not supported by Numba, do it manually
-    for lag in range(min_lag, max_lag+1):
-        samp = time_series[dt == lag]
-        if sort:
-            samp = np.sort(samp)
-        sample[lag] = samp
+    if sort:
+        for lag in sample:
+            sample[lag].sort()
+
     return sample
 
-def plot_samples(samples, ax, max_lag=-1):
+def plot_samples(samples, ax=None, max_lag=-1):
     lags = np.sort([l for l in samples.keys() if (max_lag < 0) or (l <= max_lag)])
+    if ax is None:
+        ax = plt.gca()
     ax.boxplot([samples[l] for l in lags], positions=lags)
 
 @njit
