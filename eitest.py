@@ -39,6 +39,10 @@ def obtain_samples(event_series, time_series, lag_cutoff=0, instantaneous=True, 
         sample[lag] = samp
     return sample
 
+def plot_samples(samples, ax, max_lag=-1):
+    lags = np.sort([l for l in samples.keys() if (max_lag < 0) or (l <= max_lag)])
+    ax.boxplot([samples[l] for l in lags], positions=lags)
+
 @njit
 def _ks_twosamp_stat(data1, data2, min_pts):
     '''Compute the test statistic value for the Kolmogorov-Smirnov two-sample test.
