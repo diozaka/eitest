@@ -1,9 +1,9 @@
 import numpy as np
 import scipy.stats as ss
 import matplotlib.pyplot as plt
-from numba import njit
+import numba
 
-@njit
+@numba.njit
 def distance_transform(event_series):
     '''Compute the distance to the most recent event at every time step.
 
@@ -16,7 +16,7 @@ def distance_transform(event_series):
         distance_to_event[i] = min(distance_to_event[i-1]+1, distance_to_event[i])
     return distance_to_event
 
-@njit
+@numba.njit
 def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', instantaneous=True, sort=True):
     '''Compute the samples T_k for all lags k.
 
@@ -40,7 +40,7 @@ def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', inst
             idx = np.where(dt == lag)[0]
             if len(idx) < 2:
                 break
-            sample[lag] = time_series[idx]
+            sample[lag] = time_series[idx].copy()
     elif method == 'lazy':
         # sample from P(x_t | e_{t-k}=1)
         event_idx = np.where(event_series == 1)[0]
@@ -49,7 +49,7 @@ def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', inst
             idx = idx[idx < series_length]
             if len(idx) < 2:
                 break
-            sample[lag] = time_series[idx]
+            sample[lag] = time_series[idx].copy()
 
     if sort:
         for lag in sample:
@@ -63,7 +63,7 @@ def plot_samples(samples, ax=None, max_lag=-1):
         ax = plt.gca()
     ax.boxplot([samples[l] for l in lags], positions=lags)
 
-@njit
+@numba.njit
 def _ks_twosamp_stat(data1, data2, min_pts):
     '''Compute the test statistic value for the Kolmogorov-Smirnov two-sample test.
 
@@ -79,7 +79,7 @@ def _ks_twosamp_stat(data1, data2, min_pts):
     en = np.sqrt(n1 * n2 / (n1 + n2))
     return d, en
 
-@njit
+@numba.njit
 def _ks_twosamp_stat_pairwise(sample, min_pts):
     '''Compute all pairwise Kolmogorov-Smirnov two-sample tests.'''
     lags = list(sorted(sample.keys()))
@@ -96,51 +96,47 @@ def _ks_twosamp_stat_pairwise(sample, min_pts):
             k += 1
     return ds, ens
 
-@njit
-def _mmd_rbf_dot(s1, s2, deg):
+@numba.njit
+def _mmd_rbf_dists(s1, s2):
+    '''Compute ||s1[i] - s2[j]||^2 for all pairs (i, j).'''
+    N, D = s1.shape
+    s1_norm = np.sum(s1 ** 2, axis=-1)
+    s2_norm = np.sum(s2 ** 2, axis=-1)
+    dists = np.empty((N, N))
+    for i in range(N):
+        for j in range(N):
+            dists[i, j] = s1_norm[i] + s2_norm[j]
+            for d in range(D):
+                dists[i, j] -= 2 * s1[i, d] * s2[j, d]
+    return dists
+
+
+@numba.njit
+def _mmd_rbf_dot(s1, s2, sigma):
     '''Compute the radial basis function inner product.
 
-    Adapted for Python from the Matlab MMD implementation by Arthur Gretton:
-    http://www.gatsby.ucl.ac.uk/~gretton/mmd/mmd.htm
-
     s1, s2: inputs of shape (N, D)
-    deg: kernel size'''
-    G = np.square(s1).sum(axis=1)
-    H = np.square(s2).sum(axis=1)
-    Q = np.repeat(G, s2.shape[0]).reshape(-1, s2.shape[0])
-    R = np.repeat(H, s1.shape[0]).reshape(s1.shape[0],-1).transpose()
-    H = Q + R - 2*np.dot(s1, s2.transpose())
-    H = np.exp(-H/2/deg**2)
-    return H
+    sigma: kernel size'''
+    return np.exp(-1./2./sigma**2 * _mmd_rbf_dists(s1, s2))
 
-@njit
-def _mmd_midpoint_heuristic(s1, s2):
-    '''Compute the rbf kernel size from the midpoint heuristic.
 
-    Adapted for Python from the Matlab MMD implementation by Arthur Gretton:
-    http://www.gatsby.ucl.ac.uk/~gretton/mmd/mmd.htm
+@numba.njit
+def _mmd_midpoint_heuristic(s1, s2, crop=-1):
+    '''Compute the rbf kernel size from the midpoint heuristic.'''
 
-    s1, s2: inputs of shape (N, D)
-    returns the heuristic value or np.nan, if the heuristic could not be computed'''
-    Z = np.concatenate((s1, s2))
-    N = Z.shape[0]
-    if N > 100:
-        Zmed = Z[:100,:]
-        N = 100
-    else:
-        Zmed = Z
-    G = np.sum(Zmed*Zmed, axis=1)
-    Q = np.repeat(G, N).reshape(N,-1)
-    R = np.repeat(G, N).reshape(N,-1).transpose()
-    dists = Q + R - 2*np.dot(Zmed, Zmed.transpose())
-    dists = (dists - np.tril(dists)).reshape(-1)
-    if np.any(dists > 0):
-        deg = np.sqrt(0.5*np.median(dists[dists > 0]))
-    else:
-        deg = np.nan
-    return deg
+    # use first 'crop' points from each sample
+    sample = np.concatenate((s1[:crop], s2[:crop]))
+    dists = _mmd_rbf_dists(sample, sample)
 
-@njit
+    # extract unique dists from the lower triangular part
+    dists_tril = np.tril(dists, k=-1).flatten()
+    dists_tril = dists_tril[dists_tril > 0]
+
+    sigma = np.sqrt(0.5 * np.median(dists_tril))
+    return sigma
+
+
+@numba.njit
 def _mmd_twosamp_stat(s1, s2, deg):
     '''Compute the MMD two-sample test statistic and parameters for the Gamma approximation.
 
@@ -170,7 +166,7 @@ def _mmd_twosamp_stat(s1, s2, deg):
 
     return tstat, gamma_shape, gamma_scale
 
-@njit
+@numba.njit
 def _mmd_twosamp_stat_pairwise(sample, min_pts):
     '''Numba helper to compute all pairwise MMD two-sample tests.'''
     lags = list(sorted(sample.keys()))
@@ -190,7 +186,7 @@ def _mmd_twosamp_stat_pairwise(sample, min_pts):
             else:
                 data1c = data1[:m,:]
                 data2c = data2[:m,:]
-                deg = _mmd_midpoint_heuristic(data1c, data2c)
+                deg = _mmd_midpoint_heuristic(data1c, data2c, crop=50)
                 tstats[k], g_shps[k], g_scls[k] = _mmd_twosamp_stat(data1c, data2c, deg)
             k += 1
     return tstats, g_shps, g_scls
