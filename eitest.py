@@ -96,9 +96,13 @@ def _ks_twosamp_stat_pairwise(sample, min_pts):
             k += 1
     return ds, ens
 
+
 @numba.njit
 def _mmd_rbf_dists(s1, s2):
-    '''Compute ||s1[i] - s2[j]||^2 for all pairs (i, j).'''
+    '''Compute the pairwise squared Euclidean distances D[i, j] = ||s1[i] - s2[j]||^2.
+
+    s1, s2: inputs of shape (N, D)'''
+
     N, D = s1.shape
     s1_norm = np.sum(s1 ** 2, axis=-1)
     s2_norm = np.sum(s2 ** 2, axis=-1)
@@ -116,16 +120,24 @@ def _mmd_rbf_dot(s1, s2, sigma):
     '''Compute the radial basis function inner product.
 
     s1, s2: inputs of shape (N, D)
-    sigma: kernel size'''
-    return np.exp(-1./2./sigma**2 * _mmd_rbf_dists(s1, s2))
+    sigma: kernel bandwidth'''
+
+    return np.exp(-1./(2. * sigma**2) * _mmd_rbf_dists(s1, s2))
 
 
 @numba.njit
-def _mmd_midpoint_heuristic(s1, s2, crop=-1):
-    '''Compute the rbf kernel size from the midpoint heuristic.'''
+def _mmd_median_heuristic(s1, s2, crop=-1):
+    '''Compute the rbf kernel bandwidth with the median heuristic.
 
-    # use first 'crop' points from each sample
-    sample = np.concatenate((s1[:crop], s2[:crop]))
+    Garreau, D., Jitkrittum, W., & Kanagawa, M. (2017). Large sample analysis
+    of the median heuristic. arXiv:1707.07269v3 [math.ST]
+
+    s1, s2: inputs of shape (N, D)
+    crop: if >= 0, maximum number of points to consider from each sample'''
+
+    sample = np.concatenate((
+                s1[:(None if crop < 0 else crop)],
+                s2[:(None if crop < 0 else crop)]))
     dists = _mmd_rbf_dists(sample, sample)
 
     # extract unique dists from the lower triangular part
@@ -137,32 +149,56 @@ def _mmd_midpoint_heuristic(s1, s2, crop=-1):
 
 
 @numba.njit
-def _mmd_twosamp_stat(s1, s2, deg):
-    '''Compute the MMD two-sample test statistic and parameters for the Gamma approximation.
+def _mmd_twosamp_stat(s1, s2, sigma):
+    '''Compute the biased MMD two-sample test statistic and Gamma approximation.
+
+    The MMD test statistic is computed with rbf kernels of bandwidth sigma. The
+    returned test statistic value is rescaled by the number of samples; the rescaled
+    value follows a gamma distribution with the returned shape and scale parameters.
 
     Adapted for Python from the Matlab MMD implementation by Arthur Gretton:
     http://www.gatsby.ucl.ac.uk/~gretton/mmd/mmd.htm
 
-    s1, s2: inputs of shape (N, D)'''
-    m = s1.shape[0]
+        Gretton, A., Harchaoui, Z., Fukumizu, K., & Sriperumbudur, B. K. (2009). A Fast,
+        Consistent Kernel Two-Sample Test. In: Neural Information Processing Systems.
 
-    K  = _mmd_rbf_dot(s1, s1, deg)
-    L  = _mmd_rbf_dot(s2, s2, deg)
-    KL = _mmd_rbf_dot(s1, s2, deg)
+        Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., & Smola, A. (2012).
+        A kernel two-sample test. Journal of Machine Learning Research (JMLR), 13, 723–773.
 
-    tstat  = 1./m**2 * np.sum(K + L - KL - KL.transpose())
-    tstat = tstat * m
+    s1, s2: inputs of shape (N, D)
+    sigma: bandwidth for the rbf kernel
 
-    meanMMD = 2./m * (1 - 1./m*np.sum(np.diag(KL)))
+    returns: (tstat, gamma_shape, gamma_scale)'''
 
-    K  = K  - np.diag(np.diag(K))
-    L  = L  - np.diag(np.diag(L))
-    KL = KL - np.diag(np.diag(KL))
+    N = s1.shape[0]
 
-    varMMD = 2./m/(m-1) * 1./m/(m-1) * np.sum(np.square(K + L - KL - KL.transpose()))
+    # compute Gram matrices
+    gram_11 = _mmd_rbf_dot(s1, s1, sigma)
+    gram_22 = _mmd_rbf_dot(s2, s2, sigma)
+    gram_12 = _mmd_rbf_dot(s1, s2, sigma)
 
-    gamma_shape = meanMMD**2 / varMMD
-    gamma_scale = varMMD*m / meanMMD
+    # biased test statistic value: estimate population
+    # expectations in MMD via empirical means
+    tstat = 1./N**2 * (np.sum(gram_11) - 2*np.sum(gram_12) + np.sum(gram_22))
+
+    # the Gamma approximation to the null distribution holds
+    # for the rescaled test statistic value
+    tstat = tstat * N
+
+    # mean of the null distribution
+    null_mean = 2./N * (1 - 1./N*np.sum(np.diag(gram_12)))
+
+    # eliminate diagonal entries in the Gram matrices
+    gram_11 -= np.diag(np.diag(gram_11))
+    gram_22 -= np.diag(np.diag(gram_22))
+    gram_12 -= np.diag(np.diag(gram_12))
+
+    # variance of the null distribution
+    null_var = 2./N/(N-1) * 1./N/(N-1) * np.sum(np.square(gram_11 - gram_12 - gram_12.T + gram_22))
+
+    # obtain Gamma parameters from mean and variance
+    gamma_shape = null_mean**2 / null_var
+    gamma_scale = N*null_var / null_mean
 
     return tstat, gamma_shape, gamma_scale
 
@@ -186,7 +222,7 @@ def _mmd_twosamp_stat_pairwise(sample, min_pts):
             else:
                 data1c = data1[:m,:]
                 data2c = data2[:m,:]
-                deg = _mmd_midpoint_heuristic(data1c, data2c, crop=50)
+                deg = _mmd_median_heuristic(data1c, data2c, crop=50)
                 tstats[k], g_shps[k], g_scls[k] = _mmd_twosamp_stat(data1c, data2c, deg)
             k += 1
     return tstats, g_shps, g_scls
