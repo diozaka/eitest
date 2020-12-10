@@ -149,14 +149,12 @@ def _mmd_median_heuristic(s1, s2, crop=-1):
     dists_tril = dists_tril[dists_tril > 0]
 
     dists_median = 0.
-    dists_min = np.min(dists_tril)
-    dists_max = np.max(dists_tril)
     if dists_tril.size == 0:
         # no distance is > 0; use very small value to avoid bandwidth = 0
         dists_median = 1e-5
-    elif dists_min == dists_max:
-        # numba fails to compile np.median in this case
-        dists_median = dists_min
+    elif dists_tril.min() == dists_tril.max():
+        # all distances are identical, numba fails to compile np.median in this case
+        dists_median = dists_tril[0]
     else:
         dists_median = np.median(dists_tril)
 
@@ -202,7 +200,8 @@ def _mmd_twosamp_stat(s1, s2, sigma):
     tstat = tstat * N
 
     # mean of the null distribution
-    null_mean = 2./N * (1 - 1./N*np.sum(np.diag(gram_12)))
+    null_mean = 2./N * (1. - 1./N*np.sum(np.diag(gram_12)))
+    null_mean = max(null_mean, 1e-7) # avoid numerical issues
 
     # eliminate diagonal entries in the Gram matrices
     gram_11 -= np.diag(np.diag(gram_11))
@@ -211,6 +210,7 @@ def _mmd_twosamp_stat(s1, s2, sigma):
 
     # variance of the null distribution
     null_var = 2./N/(N-1) * 1./N/(N-1) * np.sum(np.square(gram_11 - gram_12 - gram_12.T + gram_22))
+    null_var = max(null_var, 1e-7) # avoid numerical issues
 
     # obtain Gamma parameters from mean and variance
     gamma_shape = null_mean**2 / null_var
