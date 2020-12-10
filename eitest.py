@@ -36,7 +36,9 @@ def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', inst
     if method == 'eager':
         # sample from P(x_t | e_{t-k}=1, e_{t-k+1}=0, ..., e_t=0)
         dt = distance_transform(event_series)
-        for lag in range(0 if instantaneous else 1, series_length if lag_cutoff == 0 else lag_cutoff):
+        for lag in range(
+                0 if instantaneous else 1,
+                series_length if lag_cutoff <= 0 else (lag_cutoff + 1)):
             idx = np.where(dt == lag)[0]
             if len(idx) < 2:
                 break
@@ -44,7 +46,9 @@ def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', inst
     elif method == 'lazy':
         # sample from P(x_t | e_{t-k}=1)
         event_idx = np.where(event_series == 1)[0]
-        for lag in range(0 if instantaneous else 1, series_length if lag_cutoff == 0 else lag_cutoff):
+        for lag in range(
+                0 if instantaneous else 1,
+                series_length if lag_cutoff <= 0 else (lag_cutoff + 1)):
             idx = event_idx + lag
             idx = idx[idx < series_length]
             if len(idx) < 2:
