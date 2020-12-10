@@ -149,8 +149,8 @@ def _mmd_median_heuristic(s1, s2, crop=-1):
     dists_tril = dists_tril[dists_tril > 0]
 
     dists_median = 0.
-    dists_min = np.min(dists)
-    dists_max = np.max(dists)
+    dists_min = np.min(dists_tril)
+    dists_max = np.max(dists_tril)
     if dists_tril.size == 0:
         # no distance is > 0; use very small value to avoid bandwidth = 0
         dists_median = 1e-5
