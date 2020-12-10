@@ -144,12 +144,24 @@ def _mmd_median_heuristic(s1, s2, crop=-1):
                 s2[:(None if crop < 0 else crop)]))
     dists = _mmd_rbf_dists(sample, sample)
 
-    # extract unique dists from the lower triangular part
+    # extract all positive distances from the lower triangular part
     dists_tril = np.tril(dists, k=-1).flatten()
     dists_tril = dists_tril[dists_tril > 0]
 
-    sigma = np.sqrt(0.5 * np.median(dists_tril))
-    return sigma
+    dists_median = 0.
+    dists_min = np.min(dists)
+    dists_max = np.max(dists)
+    if dists_tril.size == 0:
+        # no distance is > 0; use very small value to avoid bandwidth = 0
+        dists_median = 1e-5
+    elif dists_min == dists_max:
+        # numba fails to compile np.median in this case
+        dists_median = dists_min
+    else:
+        dists_median = np.median(dists_tril)
+
+    dists_median = max(1e-5, dists_median) # avoid numerical issues
+    return np.sqrt(0.5 * dists_median)
 
 
 @numba.njit
