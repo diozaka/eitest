@@ -83,21 +83,29 @@ def _ks_twosamp_stat(data1, data2, min_pts):
     en = np.sqrt(n1 * n2 / (n1 + n2))
     return d, en
 
-@numba.njit
+@numba.njit(parallel=True)
 def _ks_twosamp_stat_pairwise(sample, min_pts):
     '''Compute all pairwise Kolmogorov-Smirnov two-sample tests.'''
+
     lags = list(sorted(sample.keys()))
-    ds  = np.empty(len(lags)*(len(lags)-1)//2)
-    ens = np.empty(len(lags)*(len(lags)-1)//2)
-    k = 0
-    for i in range(len(lags)):
+    K = len(lags)
+    ds = np.empty(K*(K-1)//2)
+    ens = np.empty(K*(K-1)//2)
+
+    # compute pairwise tests in parallel
+    for k in numba.prange(K*(K-1)//2):
+        i = k // K
+        j = k % K
+        if j <= i:
+            i = K - i - 2
+            j = K - j - 1
+
         data1 = sample[lags[i]]
-        for j in range(i+1, len(lags)):
-            data2 = sample[lags[j]]
-            d, en = _ks_twosamp_stat(data1, data2, min_pts)
-            ds[k]  = d
-            ens[k] = en
-            k += 1
+        data2 = sample[lags[j]]
+        d, en = _ks_twosamp_stat(data1, data2, min_pts)
+        ds[k]  = d
+        ens[k] = en
+
     return ds, ens
 
 
@@ -130,21 +138,16 @@ def _mmd_rbf_dot(s1, s2, sigma):
 
 
 @numba.njit
-def _mmd_median_heuristic(s1, s2, crop=-1):
+def _mmd_median_heuristic(sample):
     '''Compute the rbf kernel bandwidth with the median heuristic.
 
     Garreau, D., Jitkrittum, W., & Kanagawa, M. (2017). Large sample analysis
     of the median heuristic. arXiv:1707.07269v3 [math.ST]
 
-    s1, s2: inputs of shape (N, D)
-    crop: if >= 0, maximum number of points to consider from each sample'''
-
-    sample = np.concatenate((
-                s1[:(None if crop < 0 else crop)],
-                s2[:(None if crop < 0 else crop)]))
-    dists = _mmd_rbf_dists(sample, sample)
+    sample: input of shape (N, D)'''
 
     # extract all positive distances from the lower triangular part
+    dists = _mmd_rbf_dists(sample, sample)
     dists_tril = np.tril(dists, k=-1).flatten()
     dists_tril = dists_tril[dists_tril > 0]
 
@@ -163,7 +166,7 @@ def _mmd_median_heuristic(s1, s2, crop=-1):
 
 
 @numba.njit
-def _mmd_twosamp_stat(s1, s2, sigma):
+def _mmd_twosamp_stat(s1, s2, med_heu_crop=0):
     '''Compute the biased MMD two-sample test statistic and Gamma approximation.
 
     The MMD test statistic is computed with rbf kernels of bandwidth sigma. The
@@ -180,11 +183,18 @@ def _mmd_twosamp_stat(s1, s2, sigma):
         A kernel two-sample test. Journal of Machine Learning Research (JMLR), 13, 723–773.
 
     s1, s2: inputs of shape (N, D)
-    sigma: bandwidth for the rbf kernel
+    med_heu_crop: number of data points from every sample to consider
+                  in the median heuristic for the rbf kernel bandwidth (0 = all)
 
     returns: (tstat, gamma_shape, gamma_scale)'''
 
     N = s1.shape[0]
+
+    # estimate bandwidth for rbf kernel from subsamples of the data
+    med_heu_sample = np.concatenate((
+                s1[:(N if med_heu_crop <= 0 else med_heu_crop)],
+                s2[:(N if med_heu_crop <= 0 else med_heu_crop)]))
+    sigma = _mmd_median_heuristic(med_heu_sample)
 
     # compute Gram matrices
     gram_11 = _mmd_rbf_dot(s1, s1, sigma)
@@ -218,29 +228,39 @@ def _mmd_twosamp_stat(s1, s2, sigma):
 
     return tstat, gamma_shape, gamma_scale
 
-@numba.njit
+@numba.njit(parallel=True)
 def _mmd_twosamp_stat_pairwise(sample, min_pts):
-    '''Numba helper to compute all pairwise MMD two-sample tests.'''
-    lags = list(sorted(sample.keys()))
-    tstats = np.empty(len(lags)*(len(lags)-1)//2)
-    g_shps = np.empty(len(lags)*(len(lags)-1)//2)
-    g_scls = np.empty(len(lags)*(len(lags)-1)//2)
-    k = 0
-    for i in range(len(lags)):
-        data1 = sample[lags[i]].reshape(len(sample[lags[i]]), -1) # cast shape T to Tx1, if necessary
-        for j in range(i+1, len(lags)):
-            data2 = sample[lags[j]].reshape(len(sample[lags[j]]), -1)
+    '''Numba helper to compute all pairwise MMD two-sample tests.
 
-            # samples have to be cropped to the same length
-            m = min(len(data1), len(data2))
-            if m < min_pts:
-                tstats[k], g_shps[k], g_scls[k] = np.nan, np.nan, np.nan
-            else:
-                data1c = data1[:m,:]
-                data2c = data2[:m,:]
-                deg = _mmd_median_heuristic(data1c, data2c, crop=50)
-                tstats[k], g_shps[k], g_scls[k] = _mmd_twosamp_stat(data1c, data2c, deg)
-            k += 1
+       sample: dict with samples at all lags
+       min_pts: minimum required number of points in every sample'''
+
+    lags = list(sorted(sample.keys()))
+    K = len(lags)
+    tstats = np.empty(K*(K-1)//2)
+    g_shps = np.empty(K*(K-1)//2)
+    g_scls = np.empty(K*(K-1)//2)
+
+    # compute pairwise tests in parallel
+    for k in numba.prange(K*(K-1)//2):
+        i = k // K
+        j = k % K
+        if j <= i:
+            i = K - i - 2
+            j = K - j - 1
+
+        data1 = sample[lags[i]].reshape(len(sample[lags[i]]), -1)
+        data2 = sample[lags[j]].reshape(len(sample[lags[j]]), -1)
+
+        # crop samples to the same length
+        m = min(len(data1), len(data2))
+        if m < min_pts:
+            tstats[k], g_shps[k], g_scls[k] = np.nan, np.nan, np.nan
+        else:
+            data1c = data1[:m,:]
+            data2c = data2[:m,:]
+            tstats[k], g_shps[k], g_scls[k] = _mmd_twosamp_stat(data1c, data2c, med_heu_crop=50)
+
     return tstats, g_shps, g_scls
 
 def pairwise_twosample_tests(sample, test, min_pts=2):
