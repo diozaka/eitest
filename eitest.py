@@ -17,7 +17,8 @@ def distance_transform(event_series):
     return distance_to_event
 
 @numba.njit
-def obtain_samples(event_series, time_series, lag_cutoff=0, method='eager', instantaneous=True, sort=True):
+def obtain_samples(event_series, time_series, lag_cutoff=0,
+        method='eager', instantaneous=True, sort=True):
     '''Compute the samples T_k for all lags k.
 
     With "eager" sampling, we sample from P(x_t | e_{t-k}=1, e_{t-k+1}=0, ..., e_t=0)
@@ -167,14 +168,15 @@ def _mmd_median_heuristic(sample):
 
 @numba.njit
 def _mmd_twosamp_stat(s1, s2, med_heu_crop=0):
-    '''Compute the biased MMD two-sample test statistic and Gamma approximation.
+    '''Compute the biased MMD two-sample test statistic and Gamma approximation in O(N^2).
 
-    The MMD test statistic is computed with rbf kernels of bandwidth sigma. The
-    returned test statistic value is rescaled by the number of samples; the rescaled
-    value follows a gamma distribution with the returned shape and scale parameters.
+    The MMD test statistic is computed using rbf kernels with bandwidth selected by
+    the median heuristic. The returned test statistic value is rescaled by the number
+    of samples; the rescaled value follows a gamma distribution with the returned
+    shape and scale parameters.
 
-    Adapted for Python from the Matlab MMD implementation by Arthur Gretton:
-    http://www.gatsby.ucl.ac.uk/~gretton/mmd/mmd.htm
+        Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., & Smola, A. J. (2006).
+        A kernel method for the two-sample-problem. In: Neural Information Processing Systems.
 
         Gretton, A., Harchaoui, Z., Fukumizu, K., & Sriperumbudur, B. K. (2009). A Fast,
         Consistent Kernel Two-Sample Test. In: Neural Information Processing Systems.
@@ -182,7 +184,10 @@ def _mmd_twosamp_stat(s1, s2, med_heu_crop=0):
         Gretton, A., Borgwardt, K. M., Rasch, M. J., Schölkopf, B., & Smola, A. (2012).
         A kernel two-sample test. Journal of Machine Learning Research (JMLR), 13, 723–773.
 
-    s1, s2: inputs of shape (N, D)
+    Adapted and optimized for NumPy/Numba from the Matlab MMD implementation by Arthur Gretton:
+    http://www.gatsby.ucl.ac.uk/~gretton/mmd/mmd.htm
+
+    s1, s2: samples of shape (N, D)
     med_heu_crop: number of data points from every sample to consider
                   in the median heuristic for the rbf kernel bandwidth (0 = all)
 
@@ -190,26 +195,26 @@ def _mmd_twosamp_stat(s1, s2, med_heu_crop=0):
 
     N = s1.shape[0]
 
-    # estimate bandwidth for rbf kernel from subsamples of the data
+    # estimate the bandwidth for the rbf kernel from subsamples of the data
     med_heu_sample = np.concatenate((
                 s1[:(N if med_heu_crop <= 0 else med_heu_crop)],
                 s2[:(N if med_heu_crop <= 0 else med_heu_crop)]))
     sigma = _mmd_median_heuristic(med_heu_sample)
 
-    # compute Gram matrices
+    # compute Gram matrices with the rbf kernel
     gram_11 = _mmd_rbf_dot(s1, s1, sigma)
     gram_22 = _mmd_rbf_dot(s2, s2, sigma)
     gram_12 = _mmd_rbf_dot(s1, s2, sigma)
 
-    # biased test statistic value: estimate population
-    # expectations in MMD via empirical means
-    tstat = 1./N**2 * (np.sum(gram_11) - 2*np.sum(gram_12) + np.sum(gram_22))
+    # compute the biased estimate for MMD^2, where population expectations
+    # are replaced by empirical means (Gretton et al. 2006, eq. 4):
+    squared_MMD = 1./N**2 * (np.sum(gram_11) - 2*np.sum(gram_12) + np.sum(gram_22))
 
-    # the Gamma approximation to the null distribution holds
-    # for the rescaled test statistic value
-    tstat = tstat * N
+    # the rescaled MMD^2 value approximately follows a Gamma distribution
+    # under the null hypothesis (Gretton et al. 2009, eq. 8):
+    tstat = N * squared_MMD
 
-    # mean of the null distribution
+    # expected value of the biased MMD estimate
     null_mean = 2./N * (1. - 1./N*np.sum(np.diag(gram_12)))
     null_mean = max(null_mean, 1e-7) # avoid numerical issues
 
@@ -218,7 +223,7 @@ def _mmd_twosamp_stat(s1, s2, med_heu_crop=0):
     gram_22 -= np.diag(np.diag(gram_22))
     gram_12 -= np.diag(np.diag(gram_12))
 
-    # variance of the null distribution
+    # variance of the biased MMD estimate
     null_var = 2./N/(N-1) * 1./N/(N-1) * np.sum(np.square(gram_11 - gram_12 - gram_12.T + gram_22))
     null_var = max(null_var, 1e-7) # avoid numerical issues
 
