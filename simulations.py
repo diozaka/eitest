@@ -5,19 +5,21 @@ import numba
 
 import eitest
 
-if len(sys.argv) != 4:
-    print(f'USAGE: {sys.argv[0]} eager|lazy ks|mmd none|bonferroni|sidak|holm|hochberg|simes')
+if len(sys.argv) != 5:
+    print(f'USAGE: {sys.argv[0]} eager|lazy instant|causal ks|mmd none|bonferroni|sidak|holm|hochberg|simes')
     sys.exit(1)
 
-# global parameters
+# command line parameters
+sample_method = sys.argv[1]
+instantaneous = (sys.argv[2] == 'instant')
+twosamp_test = sys.argv[3]
+multi_test = sys.argv[4]
+
+# other global parameters
 default_T = 8192
 n_pairs = 100
 alpha = 0.05
-twosamp_test = sys.argv[2]
-multi_test = sys.argv[3]
-sample_method = sys.argv[1]
 lag_cutoff = 32
-instantaneous = True
 
 @numba.njit
 def event_series_bernoulli(series_length, event_count):
