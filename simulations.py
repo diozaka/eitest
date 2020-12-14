@@ -203,6 +203,7 @@ print(f'# mean impact model (T={default_T}, N={default_N}, q={default_q}, n_pair
 print(f'# r\ttpr\tfpr')
 for i, (tpr, fpr) in enumerate(zip(tprs, fprs)):
     print(f'{vals[i]}\t{tpr}\t{fpr}')
+print()
 
 # ## Meanconst impact model
 
@@ -261,7 +262,7 @@ for i, val in enumerate(vals):
                                         lag_cutoff=lag_cutoff, instantaneous=instantaneous,
                                         twosamp_test=twosamp_test, multi_test=multi_test, alpha=alpha)
 
-print(f'# mean impact model (T={default_T}, N={default_N}, q={default_q}, n_pairs={n_pairs}, cutoff={lag_cutoff}, instantaneous={instantaneous}, alpha={alpha}, {sample_method}-{twosamp_test}-{multi_test})')
+print(f'# meanconst impact model (T={default_T}, N={default_N}, q={default_q}, n_pairs={n_pairs}, cutoff={lag_cutoff}, instantaneous={instantaneous}, alpha={alpha}, {sample_method}-{twosamp_test}-{multi_test})')
 print(f'# r\ttpr\tfpr')
 for i, (tpr, fpr) in enumerate(zip(tprs, fprs)):
     print(f'{vals[i]}\t{tpr}\t{fpr}')
