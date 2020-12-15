@@ -6,7 +6,7 @@ import numba
 import eitest
 
 if len(sys.argv) != 5:
-    print(f'USAGE: {sys.argv[0]} eager|lazy instant|causal ks|mmd none|bonferroni|sidak|holm|hochberg|simes')
+    print(f'USAGE: {sys.argv[0]} eager|lazy instant|causal tt|ks|mmd none|bonferroni|sidak|holm|hochberg|simes')
     sys.exit(1)
 
 # command line parameters

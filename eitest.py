@@ -268,12 +268,53 @@ def _mmd_twosamp_stat_pairwise(sample, min_pts):
 
     return tstats, g_shps, g_scls
 
+@numba.njit
+def _tt_twosamp_stat_pairwise(sample, min_pts):
+    '''Numba helper to compute all pairwise two-sample t-tests.
+
+           https://www.itl.nist.gov/div898/handbook/eda/section3/eda353.htm
+    
+       sample: dict with samples at all lags
+       min_pts: minimum required number of points in every sample'''
+
+    lags = list(sorted(sample.keys()))
+    K = len(lags)
+    tstats = np.empty(K*(K-1)//2)
+    dofs = np.empty(K*(K-1)//2)
+
+    # compute pairwise tests in parallel
+    for k in numba.prange(K*(K-1)//2):
+        i = k // K
+        j = k % K
+        if j <= i:
+            i = K - i - 2
+            j = K - j - 1
+
+        data1 = sample[lags[i]]
+        data2 = sample[lags[j]]
+        if min(len(data1), len(data2)) < min_pts:
+            tstats[k] = np.nan
+            dofs[k] = np.nan
+        else:
+            n1 = len(data1)
+            n2 = len(data2)
+            m1 = data1.mean()
+            m2 = data2.mean()
+            s1sq = data1.var() * n1 / (n1 - 1.)
+            s2sq = data2.var() * n2 / (n2 - 1.)
+            spsq = ((n1 - 1.)*s1sq + (n2 - 1.)*s2sq) / (n1 + n2 - 2.)
+            tstats[k] = (m1 - m2)/np.sqrt(spsq * (1./n1 + 1./n2))
+            dofs[k] = (((s1sq/n1 + s2sq/n2)**2)
+                           / ((s1sq/n1)**2/(n1 - 1.) + (s2sq/n2)**2/(n2 - 1.)))
+
+    return tstats, dofs
+
 def pairwise_twosample_tests(sample, test, min_pts=2):
     '''For each pair of lags i<j, test whether the distributions at lags i and j are identical.
 
     sample: dict with numeric lag value as key and numpy.array as value, as returned
             by obtain_samples(). Keys do not have to be consecutive.
-    test: either 'ks' or 'mmd'.
+    test: tt, ks, or mmd.
     min_pts: minimum number of data points required in a sample to tested (default: 2);
              test result is np.nan for skipped tests.'''
 
@@ -290,6 +331,11 @@ def pairwise_twosample_tests(sample, test, min_pts=2):
     elif test == 'mmd':
         tstats, g_shps, g_scls = _mmd_twosamp_stat_pairwise(sample, min_pts)
         probs = np.array([ss.distributions.gamma.sf(tstats[k], g_shps[k], scale=g_scls[k]) for k in range(len(tstats))])
+        return tstats, probs
+    elif test == 'tt':
+        tstats, dofs = _tt_twosamp_stat_pairwise(sample, min_pts)
+        probs = 2.*ss.distributions.t.sf(np.abs(tstats), dofs) # adjustment for two-sided test
+        probs[probs > 1.] = 1.
         return tstats, probs
     else:
         raise NotImplementedError('test must be either ks or mmd')
