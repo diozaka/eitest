@@ -16,6 +16,17 @@ def distance_transform(event_series):
         distance_to_event[i] = min(distance_to_event[i-1]+1, distance_to_event[i])
     return distance_to_event
 
+
+@numba.njit
+def _sort_sample(arr):
+    '''Numba helper to sort a 1d ndarray and simply pass a 2d ndarray.'''
+
+    if arr.ndim == 1:
+        return np.sort(arr.flatten())
+    else:
+        return arr
+
+
 @numba.njit
 def obtain_samples(event_series, time_series, lag_cutoff=0,
         method='eager', instantaneous=True, sort=True):
@@ -31,6 +42,7 @@ def obtain_samples(event_series, time_series, lag_cutoff=0,
     If instantaneous is True, the sample at lag k=0 is included.
 
     If sort is True, all samples are sorted ascendingly.'''
+
     sample = dict()
     series_length = len(event_series)
 
@@ -58,7 +70,7 @@ def obtain_samples(event_series, time_series, lag_cutoff=0,
 
     if sort:
         for lag in sample:
-            sample[lag].sort()
+            sample[lag] = _sort_sample(sample[lag])
 
     return sample
 
